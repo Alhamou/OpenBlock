@@ -1,4 +1,4 @@
-# OpenBlock — Implementation Plan
+# OpenBlock architecture
 
 An open-source Safari ad blocker for macOS, modelled on how AdGuard for Safari works.
 
