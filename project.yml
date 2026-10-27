@@ -1,0 +1,130 @@
+name: OpenBlock
+options:
+  bundleIdPrefix: de.hamou
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: 9YQSNGHYX6
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    APP_GROUP_ID: $(DEVELOPMENT_TEAM).de.hamou.openblock
+    ENABLE_HARDENED_RUNTIME: YES
+
+packages:
+  BlockerCore:
+    path: Packages/BlockerCore
+
+targetTemplates:
+  ContentBlocker:
+    type: app-extension
+    platform: macOS
+    sources:
+      - Extensions/ContentBlocker
+      - Shared
+    settings:
+      base:
+        CODE_SIGN_ENTITLEMENTS: Extensions/ContentBlocker/ContentBlocker.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: de.hamou.openblock.${blocker}
+        PRODUCT_NAME: OpenBlock ${title}
+        SKIP_INSTALL: YES
+        # Safari's extension host only instantiates NSExtensionPrincipalClass when the extension
+        # links AppKit; without it the extension launches but never receives requests.
+        OTHER_LDFLAGS: -framework AppKit
+        ENABLE_DEBUG_DYLIB: NO
+    info:
+      path: Extensions/Generated/${blocker}-Info.plist
+      properties:
+        CFBundleDisplayName: OpenBlock ${title}
+        OBBlocker: ${blocker}
+        OBAppGroup: $(APP_GROUP_ID)
+        NSHumanReadableDescription: OpenBlock ${title} content blocker
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.Safari.content-blocker
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ContentBlockerRequestHandler
+
+targets:
+  OpenBlock:
+    type: application
+    platform: macOS
+    sources:
+      - App
+      - Shared
+    dependencies:
+      - package: BlockerCore
+        product: BlockerCore
+      - target: BlockerAds
+      - target: BlockerPrivacy
+      - target: BlockerAnnoyances
+      - target: BlockerCustom
+      - target: Advanced
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.hamou.openblock
+        CODE_SIGN_ENTITLEMENTS: App/OpenBlock.entitlements
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+    info:
+      path: App/Generated/Info.plist
+      properties:
+        CFBundleDisplayName: OpenBlock
+        OBAppGroup: $(APP_GROUP_ID)
+        LSApplicationCategoryType: public.app-category.utilities
+        NSHumanReadableCopyright: Open source under the MIT license
+
+  Advanced:
+    type: app-extension
+    platform: macOS
+    sources:
+      - Extensions/Advanced/SafariWebExtensionHandler.swift
+      - Shared
+      # Built by `cd WebExtension && npm run build`.
+      - path: Extensions/Advanced/Resources
+        excludes: ["_locales"]
+        buildPhase: resources
+      - path: Extensions/Advanced/Resources/_locales
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        CODE_SIGN_ENTITLEMENTS: Extensions/Advanced/Advanced.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: de.hamou.openblock.advanced
+        PRODUCT_NAME: OpenBlock Advanced
+        SKIP_INSTALL: YES
+        OTHER_LDFLAGS: -framework AppKit
+        ENABLE_DEBUG_DYLIB: NO
+    info:
+      path: Extensions/Generated/advanced-Info.plist
+      properties:
+        CFBundleDisplayName: OpenBlock Advanced
+        OBAppGroup: $(APP_GROUP_ID)
+        NSHumanReadableDescription: Scriptlets, CSS injection and extended CSS for OpenBlock
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.Safari.web-extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SafariWebExtensionHandler
+
+  BlockerAds:
+    templates: [ContentBlocker]
+    templateAttributes: { blocker: ads, title: Ads }
+  BlockerPrivacy:
+    templates: [ContentBlocker]
+    templateAttributes: { blocker: privacy, title: Privacy }
+  BlockerAnnoyances:
+    templates: [ContentBlocker]
+    templateAttributes: { blocker: annoyances, title: Annoyances }
+  BlockerCustom:
+    templates: [ContentBlocker]
+    templateAttributes: { blocker: custom, title: Custom }
+
+schemes:
+  OpenBlock:
+    build:
+      targets:
+        OpenBlock: all
+    run:
+      config: Debug
+    test:
+      config: Debug

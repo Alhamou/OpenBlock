@@ -1,0 +1,6 @@
+||localhost^*/ob-blocked-ad.js
+localhost##.ob-cosmetic
+localhost#%#//scriptlet('set-constant', 'obScriptletFlag', 'true')
+localhost#%#//scriptlet('abort-on-property-read', 'obAdDetector')
+localhost#$#.ob-css-inject { display: none !important; }
+localhost#?#.ob-ext:has-text(SPONSORED)

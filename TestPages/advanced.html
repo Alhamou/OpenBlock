@@ -1,0 +1,67 @@
+<!doctype html>
+<!--
+  OpenBlock self-test. Serve this folder and open it in Safari:
+    python3 -m http.server 8765 --directory TestPages
+    open -a Safari http://localhost:8765/advanced.html
+  Then add the rules in TestPages/rules.txt to OpenBlock → User Rules.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OpenBlock self-test</title>
+  <script>
+    // Runs before the page body, like a real anti-adblock script would.
+    window.__readBlocked = false;
+    try { void window.obAdDetector; } catch (e) { window.__readBlocked = true; }
+    window.__networkBlocked = null;
+  </script>
+  <script src="ob-blocked-ad.js" onload="window.__networkBlocked = false" onerror="window.__networkBlocked = true"></script>
+  <style>
+    body { font: 15px -apple-system, sans-serif; margin: 32px; background: #fff; color: #111; }
+    table { border-collapse: collapse; } td, th { border: 1px solid #ccc; padding: 6px 12px; text-align: left; }
+    .pass { background: #c8f7c5; } .fail { background: #ffc9c9; }
+    .ob-cosmetic, .ob-css-inject, .ob-ext { padding: 4px; border: 1px dashed #999; margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <h1>OpenBlock self-test</h1>
+  <div class="ob-cosmetic">content blocker ## target</div>
+  <div class="ob-css-inject">#$# CSS injection target</div>
+  <div class="ob-ext">SPONSORED — #?# :has-text target</div>
+  <div class="ob-ext">regular content — must stay visible</div>
+  <table id="results"><tr><th>Check</th><th>Engine</th><th>Result</th></tr></table>
+  <p id="summary"></p>
+  <script>
+    const hidden = (el) => !el || getComputedStyle(el).display === 'none';
+    const checks = [
+      ['Network block ||…/ob-blocked-ad.js', 'Content blocker', () => window.__networkBlocked === true],
+      ['Element hiding ##.ob-cosmetic', 'Content blocker', () => hidden(document.querySelector('.ob-cosmetic'))],
+      ['Scriptlet set-constant obScriptletFlag', 'Advanced', () => window.obScriptletFlag === true],
+      ['Scriptlet abort-on-property-read (read after load)', 'Advanced', () => {
+        try { void window.obAdDetector; return false; } catch (e) { return true; }
+      }],
+      ['Scriptlet active before the first inline <head> script (timing)', 'Advanced', () => window.__readBlocked === true],
+      ['CSS injection #$#', 'Advanced', () => hidden(document.querySelector('.ob-css-inject'))],
+      ['Extended CSS #?#:has-text(SPONSORED)', 'Advanced', () => hidden(document.querySelectorAll('.ob-ext')[0])],
+      ['Extended CSS leaves other content alone', 'Advanced', () => !hidden(document.querySelectorAll('.ob-ext')[1])],
+    ];
+    setTimeout(() => {
+      const table = document.getElementById('results');
+      let passed = 0;
+      for (const [name, engine, test] of checks) {
+        let ok = false;
+        try { ok = test(); } catch (e) { ok = false; }
+        passed += ok;
+        const row = table.insertRow();
+        row.className = ok ? 'pass' : 'fail';
+        row.insertCell().textContent = name;
+        row.insertCell().textContent = engine;
+        row.insertCell().textContent = ok ? 'PASS' : 'FAIL';
+      }
+      const status = document.documentElement.dataset.openblock || 'content script did not run';
+      document.getElementById('summary').textContent = `${passed}/${checks.length} passed · OpenBlock Advanced: ${status}`;
+      document.title = `OpenBlock ${passed}/${checks.length}`;
+    }, 1500);
+  </script>
+</body>
+</html>

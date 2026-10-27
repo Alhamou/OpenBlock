@@ -1,0 +1,10 @@
+build/
+*.xcodeproj/
+App/Generated/
+Extensions/Generated/
+.build/
+.swiftpm/
+xcuserdata/
+.DS_Store
+
+node_modules/

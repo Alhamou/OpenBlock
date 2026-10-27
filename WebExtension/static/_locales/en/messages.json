@@ -1,0 +1,4 @@
+{
+  "extension_name": { "message": "OpenBlock Advanced" },
+  "extension_description": { "message": "Runs OpenBlock's scriptlets, CSS injection and extended CSS rules that content blockers cannot express." }
+}

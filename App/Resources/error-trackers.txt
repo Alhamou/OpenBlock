@@ -1,0 +1,25 @@
+! Title: OpenBlock Error Trackers
+! Description: Error-monitoring and session-replay services, which record user actions on
+!   pages. The big ad/tracking lists leave them alone; blocking them very rarely breaks a site.
+! License: GPL-3.0
+!
+! Sentry
+||browser.sentry-cdn.com^$third-party
+||js.sentry-cdn.com^$third-party
+||js-de.sentry-cdn.com^$third-party
+||ingest.sentry.io^$third-party
+||ingest.us.sentry.io^$third-party
+||ingest.de.sentry.io^$third-party
+! Bugsnag (scripts are served from its CloudFront distribution)
+||d2wy8f7a9ursnm.cloudfront.net^$third-party
+||notify.bugsnag.com^$third-party
+||sessions.bugsnag.com^$third-party
+! Rollbar
+||cdn.rollbar.com^$third-party
+||api.rollbar.com/api/*/item$third-party
+! TrackJS
+||cdn.trackjs.com^$third-party
+||capture.trackjs.com^$third-party
+! Raygun
+||cdn.raygun.io^$third-party
+||api.raygun.io^$third-party
