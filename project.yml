@@ -2,7 +2,7 @@ name: OpenBlock
 options:
   bundleIdPrefix: de.hamou
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "15.0"
   createIntermediateGroups: true
 
 settings:
@@ -10,7 +10,7 @@ settings:
     DEVELOPMENT_TEAM: 9YQSNGHYX6
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.10"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "0.2.0"
     CURRENT_PROJECT_VERSION: "1"
     APP_GROUP_ID: $(DEVELOPMENT_TEAM).de.hamou.openblock
     ENABLE_HARDENED_RUNTIME: YES
@@ -74,7 +74,10 @@ targets:
         CFBundleDisplayName: OpenBlock
         OBAppGroup: $(APP_GROUP_ID)
         LSApplicationCategoryType: public.app-category.utilities
-        NSHumanReadableCopyright: Open source under the MIT license
+        NSHumanReadableCopyright: Open source under the GPL-3.0 license
+        LSUIElement: true
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
 
   Advanced:
     type: app-extension

@@ -2,11 +2,12 @@ import Foundation
 
 /// Rules that content blockers cannot express and the OpenBlock Advanced web extension applies
 /// inside the page: CSS injection (`#$#`), extended CSS (`#?#`, `#$?#`, `##` with `:has-text()` …),
-/// scriptlets (`#%#//scriptlet(...)`, `##+js(...)`) and raw JavaScript (`#%#code`).
+/// scriptlets (`#%#//scriptlet(...)`, `##+js(...)`), raw JavaScript (`#%#code`) and plain hiding
+/// rules whose domains use wildcard TLDs (`example.*##.ad`), which Safari's `if-domain` cannot match.
 ///
-/// The extension looks rules up by hostname and its parent domains: `rules` maps a domain to indices
-/// into `entries` (each rule is stored once even when it lists many domains); the `""` key holds
-/// generic rules.
+/// The extension looks rules up by hostname, its parent domains and their wildcard-TLD forms
+/// (`www.example.co.uk` → `example.*`): `rules` maps a domain to indices into `entries` (each rule is
+/// stored once even when it lists many domains); the `""` key holds generic rules.
 public struct AdvancedRuleset: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         /// Plain CSS rule injected as a user stylesheet: `selector { declarations }`.
@@ -40,6 +41,8 @@ public struct AdvancedRuleset: Codable, Equatable, Sendable {
     public var rules: [String: [Int]] = [:]
     public var exceptions: [String: [Entry]] = [:]
     public var pages: [String: [PageFlag]] = [:]
+
+    public init() {}
 
     public var ruleCount: Int { entries.count }
 
@@ -154,7 +157,9 @@ public enum AdvancedCompiler {
         var restricted: [String] = []
         let domainsText = String(text[..<hashIndex])
         if !domainsText.isEmpty {
-            guard let domains = RuleParser.parseDomains(domainsText, separator: ",") else { return .unsupported }
+            guard let domains = RuleParser.parseDomains(domainsText, separator: ",", allowWildcardTLD: true) else {
+                return .unsupported
+            }
             (permitted, restricted) = domains
         }
 
@@ -169,11 +174,20 @@ public enum AdvancedCompiler {
                 entry = body.isEmpty ? nil : .init(t: .js, c: body)
             }
         case (_, .css):
-            entry = cssInjection(body).map { .init(t: .css, c: $0) }
+            entry = cssInjection(body, allowMedia: true).map { .init(t: .css, c: $0) }
         case ("##", _), ("#@#", _):
-            // Plain selectors belong to the content blockers; only extended ones come here.
-            guard RuleParser.parse(text) == .advanced(text) else { return nil }
-            entry = extendedHiding(body).map { .init(t: .ext, c: $0) }
+            switch RuleParser.parse(text) {
+            case .advanced:
+                // Extended selectors go to ExtendedCss; plain selectors on wildcard-TLD domains are ordinary CSS.
+                entry = extendedHiding(body).map { .init(t: RuleParser.isExtendedSelector(body) ? .ext : .css, c: $0) }
+            case .rule(.cosmetic(let cosmetic)) where permitted.contains(where: { $0.hasSuffix(".*") }):
+                // `a.com,b.*##.ad`: the content blocker covers a.com; this entry covers only the wildcard domains.
+                permitted = permitted.filter { $0.hasSuffix(".*") }
+                entry = .init(t: .css, c: "\(cosmetic.selector) { display: none !important; }")
+            default:
+                // Plain selectors belong to the content blockers.
+                return nil
+            }
         case ("#$?#", _), ("#@$?#", _):
             entry = cssInjection(body).map { .init(t: .ext, c: $0) }
         default: // #?#
@@ -183,21 +197,43 @@ public enum AdvancedCompiler {
         return .rule(entry, isException: isException, permitted: permitted, restricted: restricted)
     }
 
-    /// `selector { declarations }`. Rejects `url()` and at-rules, which could load remote content.
-    static func cssInjection(_ body: String) -> String? {
+    /// `selector { declarations }`, optionally wrapped in `@media (...) { ... }` when `allowMedia`.
+    /// Rejects `url()` and other at-rules, which could load remote content.
+    static func cssInjection(_ body: String, allowMedia: Bool = false) -> String? {
         guard let open = body.firstIndex(of: "{"), body.hasSuffix("}"), open != body.startIndex else {
             return body.contains(":remove()") ? body : nil
         }
-        let lowered = body.lowercased()
-        if lowered.contains("url(") || lowered.contains("@import") || lowered.contains("expression(") || body.hasPrefix("@") {
+        if body.hasPrefix("@") && !(allowMedia && body.lowercased().hasPrefix("@media")) { return nil }
+        // Quoted strings are attribute values (`[style*="url("]`), so only unquoted `url(` can load anything.
+        let unquoted = strippingQuotedStrings(body).lowercased()
+        if unquoted.contains("url(") || unquoted.contains("@import") || unquoted.contains("expression(")
+            || unquoted.contains("image-set(") || unquoted.contains("@charset") {
             return nil
         }
         return body
     }
 
+    /// Removes the contents of single- and double-quoted strings, keeping the quotes.
+    static func strippingQuotedStrings(_ text: String) -> String {
+        var out = ""
+        var quote: Character?
+        var escaped = false
+        for character in text {
+            if let open = quote {
+                if escaped { escaped = false }
+                else if character == "\\" { escaped = true }
+                else if character == open { quote = nil; out.append(character) }
+                continue
+            }
+            if character == "\"" || character == "'" { quote = character }
+            out.append(character)
+        }
+        return out
+    }
+
     /// An extended selector that hides matches; uBO's `:style()` and `:remove()` become ExtendedCss rules.
     static func extendedHiding(_ selector: String) -> String? {
-        if selector.isEmpty || selector.contains("{") { return nil }
+        if selector.isEmpty || RuleParser.hasBraceOutsideQuotes(selector) { return nil }
         if selector.hasSuffix(":remove()") { return selector }
         if let range = selector.range(of: ":style(", options: .backwards), selector.hasSuffix(")") {
             let declarations = selector[range.upperBound..<selector.index(before: selector.endIndex)]
@@ -267,14 +303,14 @@ public enum AdvancedCompiler {
             case "jsinject", "content": flags.insert(.jsinject)
             default:
                 if lower.hasPrefix("domain="),
-                   let (permitted, _) = RuleParser.parseDomains(String(option.dropFirst(7)), separator: "|") {
+                   let (permitted, _) = RuleParser.parseDomains(String(option.dropFirst(7)), separator: "|", allowWildcardTLD: true) {
                     hosts = permitted
                 }
             }
         }
         if flags.isEmpty { return nil }
         if !pattern.isEmpty {
-            guard let host = URLFilter.hostname(fromPattern: pattern) else { return nil }
+            guard let host = URLFilter.hostname(fromPattern: pattern, allowWildcardTLD: true) else { return nil }
             hosts = [host]
         }
         return hosts.isEmpty ? nil : (hosts, flags)

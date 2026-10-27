@@ -61,3 +61,21 @@ test('real ruleset (optional): OPENBLOCK_RULESET=path', { skip: !process.env.OPE
   assert.ok(yt.scriptlets.length > 0, 'youtube has scriptlets');
   assert.ok(elapsed < 20, `lookup took ${elapsed}ms`);
 });
+
+test('wildcard-TLD domain keys', async () => {
+  const { domainKeys } = await import('../src/ruleset.js');
+  assert.deepEqual(domainKeys('www.example.co.uk'), ['www.example.co.uk', 'example.co.uk', 'co.uk', 'uk', 'www.example.*', 'example.*']);
+  assert.deepEqual(domainKeys('localhost'), ['localhost']);
+  assert.ok(!domainKeys('example.com.evil.net').includes('example.*'));
+  const wild = {
+    entries: [{ t: 'css', c: '.ad { display: none !important; }' }, { t: 'ext', c: '.p { display: none !important; }', x: ['safe.*'] }],
+    rules: { 'pinterest.*': [0], '': [1] },
+    exceptions: {},
+    pages: { 'bank.*': ['all'] },
+  };
+  assert.deepEqual(lookup(wild, 'www.pinterest.co.uk').css, ['.ad { display: none !important; }']);
+  assert.deepEqual(lookup(wild, 'www.pinterest.com').css, ['.ad { display: none !important; }']);
+  assert.deepEqual(lookup(wild, 'pinterest.example.com').css, []);
+  assert.equal(lookup(wild, 'www.safe.de').ext.length, 0);
+  assert.equal(lookup(wild, 'bank.ch').ext.length, 0);
+});

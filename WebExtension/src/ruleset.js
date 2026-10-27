@@ -2,14 +2,33 @@
 // BlockerCore's AdvancedCompiler (Swift) and has this shape:
 //
 //   entries:    [{ t: 'css'|'ext'|'scriptlet'|'js', c: text-or-name, a?: args, x?: excludedDomains }]
-//   rules:      { 'example.com': [entryIndex, ...], '': [generic entry indices] }
+//   rules:      { 'example.com': [entryIndex, ...], 'example.*': [...], '': [generic entry indices] }
 //   exceptions: { 'example.com': [entry, ...], '': [...] }  // #@#, #@$#, #@%# rules
 //   pages:      { 'example.com': ['all'|'elemhide'|'generichide'|'jsinject'] }
+//
+// Domain keys may use a wildcard TLD (`example.*`), which matches `example.com`, `example.co.uk` …
+
+import { getPublicSuffix } from 'tldts';
 
 /** `a.b.example.com` → ['a.b.example.com', 'b.example.com', 'example.com', 'com'] */
 export function parentDomains(hostname) {
   const parts = hostname.toLowerCase().replace(/\.$/, '').split('.');
   return parts.map((_, i) => parts.slice(i).join('.'));
+}
+
+/**
+ * Keys a hostname is indexed under: its parent domains plus their wildcard-TLD forms.
+ * `www.example.co.uk` → [..., 'example.co.uk', 'co.uk', 'uk', 'www.example.*', 'example.*']
+ */
+export function domainKeys(hostname) {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  const keys = parentDomains(host);
+  const suffix = getPublicSuffix(host);
+  if (suffix && suffix !== host && host.endsWith(`.${suffix}`)) {
+    const base = host.slice(0, -suffix.length - 1).split('.');
+    for (let i = 0; i < base.length; i++) keys.push(`${base.slice(i).join('.')}.*`);
+  }
+  return keys;
 }
 
 function matchesAnyDomain(domains, candidates) {
@@ -30,9 +49,9 @@ export function lookup(ruleset, hostname, topHostname = hostname) {
   const result = { css: [], ext: [], scriptlets: [], js: [] };
   if (!ruleset || !hostname) return result;
 
-  const domains = parentDomains(hostname);
+  const domains = domainKeys(hostname);
   const flags = new Set();
-  for (const host of new Set([...domains, ...parentDomains(topHostname || hostname)])) {
+  for (const host of new Set([...domains, ...domainKeys(topHostname || hostname)])) {
     for (const flag of ruleset.pages?.[host] || []) flags.add(flag);
   }
   if (flags.has('all')) return result;

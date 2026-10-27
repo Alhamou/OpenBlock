@@ -5,7 +5,7 @@ public enum ParsedLine: Equatable, Sendable {
     case rule(FilterRule)
     /// Comment, blank line or directive.
     case ignored
-    /// Rule that needs a Safari Web Extension (scriptlets, CSS injection, extended CSS).
+    /// Rule that needs a Safari Web Extension (scriptlets, CSS injection, extended CSS, wildcard-TLD domains).
     case advanced(String)
     /// Rule Safari cannot express, with the reason.
     case unsupported(String)
@@ -36,9 +36,20 @@ public enum RuleParser {
         if line.isEmpty || line.hasPrefix("!") || line.hasPrefix("[") { return .ignored }
         // A lone `#` line or `# comment` (hosts-style) is a comment.
         if line.hasPrefix("# ") || line == "#" { return .ignored }
-        if line.contains("$$") || line.contains("$@$") { return .unsupported("HTML filtering") }
+        // Hosts-file lines (`0.0.0.0 ads.example.com`) block the host like `||ads.example.com^`.
+        switch hostsEntry(line) {
+        case .host(let host): return parseNetwork("||\(host)^")
+        case .skip: return .ignored
+        case nil: break
+        }
 
-        if let hashIndex = line.firstIndex(of: "#") {
+        let hashIndex = line.firstIndex(of: "#")
+        // `example.com$$script[...]` is HTML filtering. `$$` after a cosmetic marker is ordinary text,
+        // as in `#%#//scriptlet('set-constant', '$$.analytics', ...)`.
+        let head = hashIndex.map { line[..<$0] } ?? Substring(line)
+        if head.contains("$$") || head.contains("$@$") { return .unsupported("HTML filtering") }
+
+        if let hashIndex {
             let tail = line[hashIndex...]
             if advancedMarkers.contains(where: { tail.hasPrefix($0) }) { return .advanced(line) }
             if tail.hasPrefix("##") || tail.hasPrefix("#@#") {
@@ -46,6 +57,29 @@ public enum RuleParser {
             }
         }
         return parseNetwork(line)
+    }
+
+    // MARK: Hosts files
+
+    private static let hostsAddresses: Set<Substring> = ["0.0.0.0", "127.0.0.1", "::1", "::", "0:0:0:0:0:0:0:1", "0:0:0:0:0:0:0:0"]
+    private static let hostsIgnored: Set<String> = [
+        "localhost", "localhost.localdomain", "local", "broadcasthost", "ip6-localhost", "ip6-loopback",
+        "ip6-localnet", "ip6-mcastprefix", "ip6-allnodes", "ip6-allrouters", "ip6-allhosts",
+    ]
+
+    enum HostsEntry: Equatable {
+        case host(String)
+        /// A hosts line for localhost and friends, which blocks nothing.
+        case skip
+    }
+
+    /// `0.0.0.0 ads.example.com # comment` → `ads.example.com`; `nil` when the line is not a hosts entry.
+    static func hostsEntry(_ line: String) -> HostsEntry? {
+        let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+        guard parts.count >= 2, hostsAddresses.contains(parts[0]) else { return nil }
+        let host = parts[1].lowercased()
+        guard !hostsIgnored.contains(host), host.contains("."), isValidDomain(host) else { return .skip }
+        return .host(host)
     }
 
     // MARK: Cosmetic
@@ -57,20 +91,45 @@ public enum RuleParser {
             .trimmingCharacters(in: .whitespaces)
 
         if selector.isEmpty { return .unsupported("empty selector") }
-        if extendedPseudo.contains(where: { selector.contains($0) }) { return .advanced(line) }
-        if selector.contains("{") || selector.contains("}") { return .unsupported("invalid selector") }
+        if isExtendedSelector(selector) { return .advanced(line) }
+        // Braces inside quotes (`div[x-data^="{adIndex:"]`) are fine; outside they are not a selector.
+        if hasBraceOutsideQuotes(selector) { return .unsupported("invalid selector") }
         if !selector.allSatisfy(\.isASCII) { return .unsupported("non-ASCII selector") }
 
         var rule = CosmeticRule(selector: selector)
         rule.isException = isException
         if !domainsPart.isEmpty {
             guard let (permitted, restricted) = parseDomains(domainsPart, separator: ",") else {
+                // `example.*##.ad`: Safari's `if-domain` cannot match wildcard TLDs, but OpenBlock Advanced can.
+                if parseDomains(domainsPart, separator: ",", allowWildcardTLD: true) != nil { return .advanced(line) }
                 return .unsupported("unsupported domain")
             }
             rule.permittedDomains = permitted
             rule.restrictedDomains = restricted
         }
         return .rule(.cosmetic(rule))
+    }
+
+    /// Selectors that need ExtendedCss (`:has-text()`, `:remove()` …) instead of Safari's selector engine.
+    static func isExtendedSelector(_ selector: String) -> Bool {
+        extendedPseudo.contains(where: { selector.contains($0) })
+    }
+
+    /// `true` when `{` or `}` appears outside quoted strings.
+    static func hasBraceOutsideQuotes(_ text: String) -> Bool {
+        var quote: Character?
+        var escaped = false
+        for character in text {
+            if escaped { escaped = false; continue }
+            if character == "\\" { escaped = true; continue }
+            if let open = quote {
+                if character == open { quote = nil }
+                continue
+            }
+            if character == "\"" || character == "'" { quote = character; continue }
+            if character == "{" || character == "}" { return true }
+        }
+        return false
     }
 
     // MARK: Network
@@ -168,8 +227,13 @@ public enum RuleParser {
         }
 
         if hasDocumentType {
-            guard isException else { return .unsupported("blocking $document") }
-            rule.isDocumentException = true
+            if isException {
+                rule.isDocumentException = true
+            } else {
+                // `||scam.example^$document` blocks navigating to the page itself (top-frame document loads).
+                positiveTypes.insert(.document)
+                rule.topFrameOnly = true
+            }
         }
         if !positiveTypes.isEmpty {
             rule.resourceTypes = positiveTypes.subtracting(negativeTypes)
@@ -204,9 +268,9 @@ public enum RuleParser {
     }
 
     /// Parses `a.com,~b.a.com` (cosmetic) or `a.com|~b.com` ($domain).
-    /// Domains Safari cannot express (wildcard TLDs, regexes, non-ASCII) are dropped;
-    /// returns `nil` when nothing usable remains.
-    static func parseDomains(_ text: String, separator: Character) -> ([String], [String])? {
+    /// Domains Safari cannot express (regexes, non-ASCII, and wildcard TLDs unless `allowWildcardTLD`)
+    /// are dropped; returns `nil` when nothing usable remains.
+    static func parseDomains(_ text: String, separator: Character, allowWildcardTLD: Bool = false) -> ([String], [String])? {
         var permitted: [String] = []
         var restricted: [String] = []
         var hadPermitted = false
@@ -214,7 +278,7 @@ public enum RuleParser {
             var domain = raw.trimmingCharacters(in: .whitespaces).lowercased()
             let negated = domain.hasPrefix("~")
             if negated { domain.removeFirst() } else { hadPermitted = true }
-            guard isValidDomain(domain) else { continue }
+            guard isValidDomain(domain, allowWildcardTLD: allowWildcardTLD) else { continue }
             if negated { restricted.append(domain) } else { permitted.append(domain) }
         }
         // Dropping every permitted domain would turn a site-specific rule into a generic one.
@@ -225,7 +289,10 @@ public enum RuleParser {
 
     private static let domainCharacters = Set("abcdefghijklmnopqrstuvwxyz0123456789.-_")
 
-    static func isValidDomain(_ domain: String) -> Bool {
-        !domain.isEmpty && domain.allSatisfy(domainCharacters.contains) && !domain.hasPrefix(".") && !domain.hasSuffix(".")
+    /// `example.com`; with `allowWildcardTLD`, also `example.*` (any public suffix).
+    public static func isValidDomain(_ domain: String, allowWildcardTLD: Bool = false) -> Bool {
+        var domain = Substring(domain)
+        if allowWildcardTLD && domain.hasSuffix(".*") { domain = domain.dropLast(2) }
+        return !domain.isEmpty && domain.allSatisfy(domainCharacters.contains) && !domain.hasPrefix(".") && !domain.hasSuffix(".")
     }
 }

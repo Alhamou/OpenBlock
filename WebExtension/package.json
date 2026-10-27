@@ -2,7 +2,7 @@
   "name": "openblock-advanced",
   "private": true,
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Content scripts for the OpenBlock Advanced Safari Web Extension",
   "license": "GPL-3.0-only",
   "scripts": {
@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@adguard/extended-css": "2.3.0",
-    "@adguard/scriptlets": "2.5.1"
+    "@adguard/scriptlets": "2.5.1",
+    "tldts": "7.4.19"
   },
   "devDependencies": {
     "esbuild": "0.28.2",

@@ -121,6 +121,7 @@ public struct Converter: Sendable {
         if rule.matchCase { trigger.urlFilterIsCaseSensitive = true }
         if let types = rule.resourceTypes { trigger.resourceType = types.sorted().map(\.rawValue) }
         if rule.subdocumentOnly { trigger.loadContext = ["child-frame"] }
+        if rule.topFrameOnly { trigger.loadContext = ["top-frame"] }
         if let thirdParty = rule.thirdParty { trigger.loadType = [thirdParty ? "third-party" : "first-party"] }
         applyDomains(permitted: rule.permittedDomains, restricted: rule.restrictedDomains, to: &trigger)
 

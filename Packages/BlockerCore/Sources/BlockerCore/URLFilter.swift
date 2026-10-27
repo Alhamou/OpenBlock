@@ -92,12 +92,12 @@ enum URLFilter {
     }
 
     /// `||example.com^` style patterns that name exactly one host, used for page-level exceptions.
-    static func hostname(fromPattern pattern: String) -> String? {
+    static func hostname(fromPattern pattern: String, allowWildcardTLD: Bool = false) -> String? {
         var body = Substring(pattern)
         guard body.hasPrefix("||") else { return nil }
         body = body.dropFirst(2)
         while body.hasSuffix("^") || body.hasSuffix("/") || body.hasSuffix("|") { body = body.dropLast() }
         let host = body.lowercased()
-        return RuleParser.isValidDomain(host) ? host : nil
+        return RuleParser.isValidDomain(host, allowWildcardTLD: allowWildcardTLD) ? host : nil
     }
 }

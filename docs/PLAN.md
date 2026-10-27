@@ -83,6 +83,8 @@ from `Info.plist` (`OBRulesFile`).
 - [x] `!#if/!#else/!#endif` and `!#safari_cb_affinity` routing
 - [x] Unit tests and a CLI that verifies output with WebKit's real compiler
 - [x] macOS app: filter catalog, download, convert, reload, custom rules, allowlist, auto-update
+- [x] Blocking `$document` rules (`resource-type: document`, `load-context: top-frame`) and hosts-file lists
+- [x] Menu bar item (status, update, pause), Dock icon only while the window is open, launch at login
 - [x] Four content-blocker extensions sharing one App Group
 
 ### Phase 2 — "OpenBlock Advanced" Safari Web Extension (implemented)
@@ -108,13 +110,20 @@ App ──AdvancedCompiler──▶ Rules/advanced.json (App Group)
       uBO aliases (`aopr`, `nostif` …) are resolved by the AdGuard library.
 - [x] Tests: Swift (`swift test`) and JS (`npm test`), which runs minified scriptlets in jsdom.
 - [ ] `$redirect` / `$removeparam` via `declarativeNetRequest`
-- [ ] Wildcard-TLD domains (`example.*`), currently skipped
+- [x] Wildcard-TLD domains (`example.*`): the extension indexes them and matches hostnames through the public
+      suffix list (`tldts`). Plain `example.*##.ad` rules also run here, since Safari's `if-domain` cannot match them
 
 ### Phase 3 — Polish
-- Menu-bar item with a "pause on this site" toggle (via the Safari Web Extension popup)
+- Safari toolbar popup for OpenBlock Advanced with a "disable on this site" toggle (the app already has a global pause)
 - Incremental list updates (`! Diff-Path:` patches) to save bandwidth
-- Launch-at-login helper using `SMAppService` for background updates
+- Element picker: click an element in Safari to create a hiding rule
 - Rule hit statistics (not possible with content blockers alone; needs Phase 2)
+
+### Phase 4 — Blocking outside Safari
+Safari content blockers and web extensions only run inside Safari. The practical way to block ad and
+tracker domains in every app is a DNS configuration installed with `NEDNSSettingsManager` that points
+macOS to a filtering resolver (AdGuard DNS or NextDNS over HTTPS). It needs the "DNS Settings"
+Network Extension capability on the App ID and cannot hide page elements or stop YouTube ads.
 
 ## 5. Build & enable
 

@@ -8,6 +8,7 @@ struct ContentView: View {
         case filters = "Filters"
         case userRules = "User Rules"
         case allowlist = "Allowlist"
+        case settings = "Settings"
 
         var id: String { rawValue }
         var symbol: String {
@@ -16,6 +17,7 @@ struct ContentView: View {
             case .filters: "list.bullet.rectangle"
             case .userRules: "pencil.and.list.clipboard"
             case .allowlist: "checkmark.seal"
+            case .settings: "gearshape"
             }
         }
     }
@@ -35,19 +37,28 @@ struct ContentView: View {
             case .filters: FiltersView()
             case .userRules: UserRulesView()
             case .allowlist: AllowlistView()
+            case .settings: SettingsView()
             }
         }
         .toolbar {
-            ToolbarItem {
+            ToolbarItemGroup {
                 if manager.isUpdating {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)
                         Text(manager.progress).font(.caption).foregroundStyle(.secondary)
                     }
                 } else {
-                    Button { Task { await manager.update(download: true) } } label: {
+                    if manager.pendingApply {
+                        Button { Task { await manager.applyPendingChanges() } } label: {
+                            Label("Apply Changes", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .help("Download new lists and rebuild the Safari rules")
+                    }
+                    Button { Task { await manager.update(download: .all) } } label: {
                         Label("Update Filters", systemImage: "arrow.clockwise")
                     }
+                    .help("Download every enabled list again")
                 }
             }
         }
@@ -59,15 +70,28 @@ struct ContentView: View {
 struct OverviewView: View {
     @EnvironmentObject private var manager: FilterManager
 
-    private var allEnabled: Bool {
-        BlockerCategory.allCases.allSatisfy { manager.statuses[$0]?.enabledInSafari == true }
-            && manager.advanced.enabledInSafari
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if !allEnabled {
+                if manager.isPaused {
+                    GroupBox {
+                        HStack(alignment: .center, spacing: 12) {
+                            Image(systemName: "pause.circle.fill").foregroundStyle(.orange).font(.title2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Blocking is paused").font(.headline)
+                                Text("Safari loads every page without OpenBlock's rules until you resume.")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Resume") { Task { await manager.setPaused(false) } }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(4)
+                    }
+                }
+
+                if !manager.allEnabledInSafari {
                     GroupBox {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.title2)
@@ -96,7 +120,7 @@ struct OverviewView: View {
 
                 Group {
                     if let date = manager.lastUpdate {
-                        Text("Filters updated \(date, style: .relative) ago")
+                        Text("Filters updated \(date, style: .relative) ago · next check within 24 hours while OpenBlock runs")
                     } else {
                         Text("Filters have not been downloaded yet")
                     }
@@ -120,11 +144,7 @@ struct BlockerCard: View {
                 HStack {
                     Label(category.title, systemImage: category.symbol).font(.headline)
                     Spacer()
-                    Text(status?.enabledInSafari == true ? "On" : "Off in Safari")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(status?.enabledInSafari == true ? Color.green.opacity(0.2) : Color.orange.opacity(0.2),
-                                    in: Capsule())
+                    StatusBadge(on: status?.enabledInSafari == true)
                 }
                 let stats = status?.stats ?? ConversionStats()
                 Text("\(stats.safariRules.formatted()) Safari rules")
@@ -148,6 +168,17 @@ struct BlockerCard: View {
     }
 }
 
+struct StatusBadge: View {
+    let on: Bool
+
+    var body: some View {
+        Text(on ? "On" : "Off in Safari")
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(on ? Color.green.opacity(0.2) : Color.orange.opacity(0.2), in: Capsule())
+    }
+}
+
 struct AdvancedCard: View {
     @EnvironmentObject private var manager: FilterManager
     let status: FilterManager.AdvancedStatus
@@ -158,10 +189,7 @@ struct AdvancedCard: View {
                 HStack {
                     Label("Advanced", systemImage: "wand.and.stars").font(.headline)
                     Spacer()
-                    Text(status.enabledInSafari ? "On" : "Off in Safari")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(status.enabledInSafari ? Color.green.opacity(0.2) : Color.orange.opacity(0.2), in: Capsule())
+                    StatusBadge(on: status.enabledInSafari)
                 }
                 Text("\(status.stats.rules.formatted()) in-page rules").font(.title3.monospacedDigit())
                 Text("Scriptlets, CSS injection and extended CSS (for example YouTube ads and anti-adblock walls). "
@@ -188,16 +216,21 @@ struct AdvancedCard: View {
 struct FiltersView: View {
     @EnvironmentObject private var manager: FilterManager
     @State private var showingAdd = false
-    @State private var dirty = false
 
     var body: some View {
         Form {
+            if manager.pendingApply {
+                SwiftUI.Section {
+                    Label("List changes take effect when you click “Apply Changes” in the toolbar.", systemImage: "info.circle")
+                        .foregroundStyle(.secondary)
+                }
+            }
             ForEach(BlockerCategory.allCases) { category in
                 let lists = manager.allLists.filter { $0.category == category }
                 if !lists.isEmpty {
                     SwiftUI.Section(category.title) {
                         ForEach(lists) { list in
-                            FilterRow(list: list, dirty: $dirty)
+                            FilterRow(list: list)
                         }
                     }
                 }
@@ -209,37 +242,30 @@ struct FiltersView: View {
             ToolbarItem {
                 Button { showingAdd = true } label: { Label("Add Filter List", systemImage: "plus") }
             }
-            if dirty {
-                ToolbarItem {
-                    Button("Apply") {
-                        dirty = false
-                        Task { await manager.update(download: true) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
         }
-        .sheet(isPresented: $showingAdd) { AddListSheet { dirty = true } }
+        .sheet(isPresented: $showingAdd) { AddListSheet() }
     }
 }
 
 struct FilterRow: View {
     @EnvironmentObject private var manager: FilterManager
     let list: FilterList
-    @Binding var dirty: Bool
 
     var body: some View {
         let enabled = Binding(
             get: { manager.enabledIDs.contains(list.id) },
-            set: { on in
-                if on { manager.enabledIDs.insert(list.id) } else { manager.enabledIDs.remove(list.id) }
-                dirty = true
-            }
+            set: { manager.setEnabled($0, for: list) }
         )
         Toggle(isOn: enabled) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(list.name)
                 Text(list.summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let info = manager.listInfo[list.id] {
+                    Text("\(info.ruleCount.formatted()) rules · downloaded \(info.downloadedAt, style: .relative) ago")
+                        .font(.caption).foregroundStyle(.tertiary)
+                } else if enabled.wrappedValue {
+                    Text("Not downloaded yet").font(.caption).foregroundStyle(.tertiary)
+                }
                 if let error = manager.downloadErrors[list.id] {
                     Text("Download failed: \(error)").font(.caption).foregroundStyle(.red)
                 }
@@ -247,7 +273,7 @@ struct FilterRow: View {
         }
         .contextMenu {
             if list.isUserAdded {
-                Button("Remove", role: .destructive) { manager.removeUserList(list); dirty = true }
+                Button("Remove", role: .destructive) { manager.removeUserList(list) }
             }
         }
     }
@@ -256,10 +282,15 @@ struct FilterRow: View {
 struct AddListSheet: View {
     @EnvironmentObject private var manager: FilterManager
     @Environment(\.dismiss) private var dismiss
-    var onAdd: () -> Void
     @State private var name = ""
     @State private var url = ""
     @State private var category: BlockerCategory = .custom
+
+    private var parsedURL: URL? {
+        guard let parsed = URL(string: url.trimmingCharacters(in: .whitespaces)), parsed.scheme?.hasPrefix("http") == true,
+              parsed.host != nil else { return nil }
+        return parsed
+    }
 
     var body: some View {
         Form {
@@ -268,7 +299,8 @@ struct AddListSheet: View {
             Picker("Content blocker", selection: $category) {
                 ForEach(BlockerCategory.allCases) { Text($0.title).tag($0) }
             }
-            Text("Each Safari content blocker holds at most 150,000 rules. Put large lists in a blocker with room.")
+            Text("AdBlock syntax and hosts files (`0.0.0.0 ads.example.com`) are supported. "
+                 + "Each Safari content blocker holds at most 150,000 rules; put large lists in a blocker with room.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
@@ -277,12 +309,11 @@ struct AddListSheet: View {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Add") {
-                    guard let parsed = URL(string: url), parsed.scheme?.hasPrefix("http") == true else { return }
+                    guard let parsed = parsedURL else { return }
                     manager.addUserList(name: name.isEmpty ? parsed.host ?? url : name, url: parsed, category: category)
-                    onAdd()
                     dismiss()
                 }
-                .disabled(URL(string: url)?.scheme?.hasPrefix("http") != true)
+                .disabled(parsedURL == nil)
             }
         }
     }
@@ -311,12 +342,28 @@ struct UserRulesView: View {
                 .padding(6)
                 .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
 
+            let report = manager.userRulesReport
+            if draft == manager.userRules, report.rules + report.unsupported > 0 {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(report.rules.formatted()) rules in use · \(report.unsupported.formatted()) not supported")
+                        .font(.caption)
+                        .foregroundStyle(report.unsupported > 0 ? Color.orange : Color.secondary)
+                    ForEach(Array(report.issues.prefix(8).enumerated()), id: \.offset) { _, issue in
+                        Text("\(issue.line)   (\(issue.reason))")
+                            .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).textSelection(.enabled)
+                    }
+                    if report.unsupported > 8 {
+                        Text("and \(report.unsupported - 8) more").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             HStack {
                 Spacer()
                 Button("Revert") { draft = manager.userRules }.disabled(draft == manager.userRules)
                 Button("Save & Apply") {
                     manager.userRules = draft
-                    Task { await manager.update(download: false) }
+                    Task { await manager.update(download: .none) }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(draft == manager.userRules)
@@ -334,13 +381,24 @@ struct AllowlistView: View {
     @EnvironmentObject private var manager: FilterManager
     @State private var newDomain = ""
 
+    private var trimmed: String { newDomain.trimmingCharacters(in: .whitespaces) }
+    private var normalized: String? { FilterManager.normalizedAllowlistEntry(newDomain) }
+
     var body: some View {
         Form {
             SwiftUI.Section {
                 HStack {
                     TextField("example.com", text: $newDomain)
                         .onSubmit(add)
-                    Button("Add", action: add).disabled(normalized.isEmpty)
+                    Button("Add", action: add).disabled(normalized == nil)
+                }
+                if !trimmed.isEmpty, normalized == nil {
+                    Text("Enter a domain such as example.com (a pasted link works too).")
+                        .font(.caption).foregroundStyle(.red)
+                } else if let domain = normalized, manager.allowlist.contains(domain) {
+                    Text("\(domain) is already allowed.").font(.caption).foregroundStyle(.secondary)
+                } else if let domain = normalized, domain != trimmed.lowercased() {
+                    Text("Will be added as \(domain)").font(.caption).foregroundStyle(.secondary)
                 }
             } footer: {
                 Text("OpenBlock does not block anything on these sites or their subdomains.")
@@ -354,8 +412,7 @@ struct AllowlistView: View {
                         Text(domain)
                         Spacer()
                         Button(role: .destructive) {
-                            manager.allowlist.removeAll { $0 == domain }
-                            Task { await manager.update(download: false) }
+                            Task { await manager.removeAllowlistEntry(domain) }
                         } label: { Image(systemName: "minus.circle") }
                         .buttonStyle(.borderless)
                     }
@@ -366,17 +423,57 @@ struct AllowlistView: View {
         .navigationTitle("Allowlist")
     }
 
-    /// Accepts a bare domain or a pasted URL.
-    private var normalized: String {
-        let text = newDomain.trimmingCharacters(in: .whitespaces).lowercased()
-        return URL(string: text)?.host ?? text.components(separatedBy: "/").first ?? ""
-    }
-
     private func add() {
-        let domain = normalized
-        guard !domain.isEmpty, !manager.allowlist.contains(domain) else { return }
-        manager.allowlist.append(domain)
+        guard let domain = normalized, !manager.allowlist.contains(domain) else { return }
         newDomain = ""
-        Task { await manager.update(download: false) }
+        Task { await manager.addAllowlistEntry(domain) }
+    }
+}
+
+// MARK: - Settings
+
+struct SettingsView: View {
+    @EnvironmentObject private var manager: FilterManager
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        Form {
+            SwiftUI.Section("Blocking") {
+                Toggle("Pause blocking", isOn: Binding(
+                    get: { manager.isPaused },
+                    set: { paused in Task { await manager.setPaused(paused) } }
+                ))
+                Text("Safari loads pages without OpenBlock's rules while paused. Useful when a site breaks.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            SwiftUI.Section("App") {
+                Toggle("Keep OpenBlock in the menu bar only", isOn: $settings.menuBarOnly)
+                Text("The Dock icon appears only while this window is open. Closing the window leaves OpenBlock "
+                     + "running in the menu bar, where filters keep updating every 24 hours.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Launch at login", isOn: Binding(
+                    get: { settings.launchAtLogin },
+                    set: { settings.setLaunchAtLogin($0) }
+                ))
+                if let note = settings.launchAtLoginNote {
+                    Text(note).font(.caption).foregroundStyle(.orange)
+                }
+            }
+            SwiftUI.Section("Filters") {
+                LabeledContent("Automatic updates", value: "Every 24 hours while OpenBlock runs")
+                if let date = manager.lastUpdate {
+                    LabeledContent("Last update", value: date.formatted(date: .abbreviated, time: .shortened))
+                }
+                Button("Update Filters Now") { Task { await manager.update(download: .all) } }
+                    .disabled(manager.isUpdating)
+            }
+            SwiftUI.Section("About") {
+                LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
+                LabeledContent("License", value: "GPL-3.0")
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Settings")
+        .onAppear { settings.refreshLaunchAtLogin() }
     }
 }

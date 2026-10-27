@@ -40,7 +40,7 @@ public struct BlockerBuilder: Sendable {
 
         let allowRules = allowlist
             .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
-            .filter(RuleParser.isValidDomain)
+            .filter { RuleParser.isValidDomain($0) }
             .map { "@@||\($0)^$document" }
 
         var results: [BlockerCategory: ConversionResult] = [:]

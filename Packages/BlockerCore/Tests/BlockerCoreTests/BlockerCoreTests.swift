@@ -58,9 +58,11 @@ final class RuleParserTests: XCTestCase {
         XCTAssertEqual(RuleParser.parse("example.com#$#body { overflow: auto; }"), .advanced("example.com#$#body { overflow: auto; }"))
         XCTAssertEqual(RuleParser.parse("example.com##div:has-text(Ad)"), .advanced("example.com##div:has-text(Ad)"))
         XCTAssertEqual(RuleParser.parse("||x.com^$redirect=noopjs"), .unsupported("$redirect"))
-        XCTAssertEqual(RuleParser.parse("||x.com^$document"), .unsupported("blocking $document"))
-        // Wildcard TLDs cannot be expressed, so a site-specific rule must not become generic.
-        XCTAssertEqual(RuleParser.parse("example.*##.ad"), .unsupported("unsupported domain"))
+        guard case .rule(.network(let document)) = RuleParser.parse("||x.com^$document") else { return XCTFail() }
+        XCTAssertTrue(document.topFrameOnly)
+        // Safari cannot match wildcard TLDs, so the rule goes to OpenBlock Advanced instead of becoming generic.
+        XCTAssertEqual(RuleParser.parse("example.*##.ad"), .advanced("example.*##.ad"))
+        XCTAssertEqual(RuleParser.parse("exam ple.com##.ad"), .unsupported("unsupported domain"))
     }
 
     func testRegexRuleKeepsDollar() {
@@ -151,5 +153,51 @@ final class PreprocessorTests: XCTestCase {
         XCTAssertEqual(results[.privacy]?.rules.map(\.action.type), [.ignorePreviousRules, .ignorePreviousRules])
         // The allowlist reaches every blocker.
         XCTAssertEqual(results[.custom]?.rules.first?.trigger.ifDomain, ["*mysite.com"])
+    }
+}
+
+final class ParserFixTests: XCTestCase {
+    func testHostsFileLines() {
+        guard case .rule(.network(let rule)) = RuleParser.parse("0.0.0.0 ads.example.com # tracker") else { return XCTFail() }
+        XCTAssertEqual(rule.pattern, "||ads.example.com^")
+        XCTAssertEqual(RuleParser.parse("127.0.0.1 localhost"), .ignored)
+        XCTAssertEqual(RuleParser.parse("# 0.0.0.0 commented.com"), .ignored)
+    }
+
+    func testDollarDollarInsideScriptletIsNotHtmlFiltering() {
+        let line = "apkpure.com#%#//scriptlet('set-constant', '$$.analytics', 'emptyObj')"
+        XCTAssertEqual(RuleParser.parse(line), .advanced(line))
+        XCTAssertEqual(RuleParser.parse("example.com$$script[data-src]"), .unsupported("HTML filtering"))
+    }
+
+    func testBracesInsideQuotesAreValid() {
+        guard case .rule(.cosmetic(let rule)) = RuleParser.parse(#"spiegel.de##div[x-data^="{adIndex:"]"#) else { return XCTFail() }
+        XCTAssertEqual(rule.selector, #"div[x-data^="{adIndex:"]"#)
+        XCTAssertEqual(RuleParser.parse("chip.de##.x {remove:true;}"), .unsupported("invalid selector"))
+    }
+
+    func testBlockingDocumentRulesTargetTopFrame() {
+        let rules = Converter().convert(lines: ["||scam.example^$document", "||pop.example^$document,popup"]).rules
+        XCTAssertEqual(rules.count, 2)
+        XCTAssertEqual(rules[0].trigger.resourceType, ["document"])
+        XCTAssertEqual(rules[0].trigger.loadContext, ["top-frame"])
+        XCTAssertEqual(rules[0].action.type, .block)
+        XCTAssertEqual(rules[1].trigger.resourceType, ["document", "popup"])
+    }
+
+    func testWildcardTldCosmeticRulesGoToAdvanced() {
+        XCTAssertEqual(RuleParser.parse("pinterest.*##.ad"), .advanced("pinterest.*##.ad"))
+        // A mixed rule stays in the content blocker for the plain domain.
+        guard case .rule(.cosmetic(let rule)) = RuleParser.parse("a.com,b.*##.ad") else { return XCTFail() }
+        XCTAssertEqual(rule.permittedDomains, ["a.com"])
+        XCTAssertTrue(RuleParser.isValidDomain("example.*", allowWildcardTLD: true))
+        XCTAssertFalse(RuleParser.isValidDomain("example.*"))
+    }
+
+    func testListInspector() {
+        let report = ListInspector.inspect("||ads.com^\n! comment\n||x.com^$redirect=noopjs\nexample.com#$#.a { background: url(x) }")
+        XCTAssertEqual(report.rules, 1)
+        XCTAssertEqual(report.unsupported, 2)
+        XCTAssertEqual(report.issues.map(\.reason), ["$redirect", "unsupported in-page rule"])
     }
 }

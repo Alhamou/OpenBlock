@@ -68,3 +68,42 @@ final class AdvancedRulesTests: XCTestCase {
         XCTAssertEqual(ruleset.ruleCount, 0)
     }
 }
+
+final class AdvancedRulesWildcardTests: XCTestCase {
+    private func compile(_ lines: [String]) -> AdvancedRuleset {
+        AdvancedCompiler.compile(lines.map { .init(text: $0, trusted: true) }).0
+    }
+
+    func testWildcardTldDomains() {
+        let ruleset = compile([
+            "pinterest.*#%#//scriptlet('set-constant', 'x', 'true')",
+            "pinterest.*##.ad",
+            "a.com,b.*##.promo",
+            "~c.*#?#div:has-text(Ad)",
+            "@@||ebay.*^$generichide",
+        ])
+        XCTAssertEqual(ruleset.rules(for: "pinterest.*"), [
+            .init(t: .scriptlet, c: "set-constant", a: ["x", "true"]),
+            .init(t: .css, c: ".ad { display: none !important; }"),
+        ])
+        XCTAssertEqual(ruleset.rules(for: "b.*"), [.init(t: .css, c: ".promo { display: none !important; }")])
+        XCTAssertNil(ruleset.rules(for: "a.com"))
+        XCTAssertEqual(ruleset.rules(for: "")?.first?.x, ["c.*"])
+        XCTAssertEqual(ruleset.pages["ebay.*"], [.generichide])
+    }
+
+    func testMediaQueriesAndQuotedUrls() {
+        let ruleset = compile([
+            "a.com#$#@media (max-width: 768px) { body nav { transform: none !important; } }",
+            "a.com#$#@import url(evil.css);",
+            #"a.com#$#div[style*="background: url("] > div { width: 100% !important }"#,
+            "a.com#$#.x { background: url(https://evil.test/a.png) }",
+            #"a.com##div[x-data^="{adIndex:"]:has-text(Ad)"#,
+        ])
+        XCTAssertEqual(ruleset.rules(for: "a.com")?.map(\.c), [
+            "@media (max-width: 768px) { body nav { transform: none !important; } }",
+            #"div[style*="background: url("] > div { width: 100% !important }"#,
+            #"div[x-data^="{adIndex:"]:has-text(Ad) { display: none !important; }"#,
+        ])
+    }
+}

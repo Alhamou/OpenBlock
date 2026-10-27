@@ -36,6 +36,8 @@ public struct NetworkRule: Equatable, Sendable {
     public var resourceTypes: Set<ResourceType>?
     /// `true` when the only requested type was `$subdocument` (adds `load-context: child-frame`).
     public var subdocumentOnly = false
+    /// `true` for blocking `$document` rules: they match the page load itself (`load-context: top-frame`).
+    public var topFrameOnly = false
     public var permittedDomains: [String] = []
     public var restrictedDomains: [String] = []
     public var isImportant = false

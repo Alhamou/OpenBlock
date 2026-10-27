@@ -104,17 +104,14 @@ async function insertCss(target, css) {
   }
 }
 
-// Scriptlets must run before the page's own scripts, so they are injected as soon as the
-// navigation commits rather than when the content script asks. Each frame's injection is
-// memoized by URL; the content script's request then reuses it. Scriptlets also guard
-// themselves against running twice (`uniqueId`), so an occasional double injection is harmless.
+// Scriptlets must run before the page's own scripts, so they are injected as soon as a
+// navigation commits rather than when the content script asks. Every commit is a new document
+// (a reload or back/forward too), so every commit injects again; the content script's request
+// then reuses the injection made for its URL. Scriptlets also guard themselves against running
+// twice (`uniqueId`), so an occasional double injection is harmless.
 const injections = new Map(); // `${tabId}:${frameId}` → { url, done }
 
 function inject(tabId, frameId, url, topUrl) {
-  const key = `${tabId}:${frameId}`;
-  const existing = injections.get(key);
-  if (existing && existing.url === url) return existing.done;
-
   const done = (async () => {
     const hostname = hostnameOf(url);
     const rules = lookup(await currentRuleset(), hostname, hostnameOf(topUrl) || hostname);
@@ -125,8 +122,15 @@ function inject(tabId, frameId, url, topUrl) {
     ]);
     return { rules, fallbackScripts, css: cssInserted ? [] : rules.css };
   })();
-  injections.set(key, { url, done });
+  injections.set(`${tabId}:${frameId}`, { url, done });
   return done;
+}
+
+/** The injection already made for this frame's current URL, or a new one. */
+function injectionFor(tabId, frameId, url, topUrl) {
+  const existing = injections.get(`${tabId}:${frameId}`);
+  if (existing && existing.url === url) return existing.done;
+  return inject(tabId, frameId, url, topUrl);
 }
 
 browser.webNavigation.onCommitted.addListener(({ tabId, frameId, url }) => {
@@ -145,7 +149,7 @@ async function handleGetRules(message, sender) {
   const topHostname = hostnameOf(sender.tab?.url || message.url) || hostname;
 
   if (tabId !== undefined) {
-    const injected = await inject(tabId, sender.frameId ?? 0, message.url, sender.tab?.url);
+    const injected = await injectionFor(tabId, sender.frameId ?? 0, message.url, sender.tab?.url);
     return {
       css: injected.css,
       ext: injected.rules.ext,
