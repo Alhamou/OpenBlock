@@ -2,7 +2,7 @@
   "name": "openblock-advanced",
   "private": true,
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Content scripts for the OpenBlock Advanced Safari Web Extension",
   "license": "GPL-3.0-only",
   "scripts": {
