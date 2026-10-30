@@ -52,8 +52,9 @@ Requires macOS 15 Sequoia or later.
 3. Open OpenBlock, pick your filter lists, and wait for the first conversion to finish.
 4. In **Safari → Settings → Extensions**:
    1. enable the four **OpenBlock** content blockers;
-   2. enable **OpenBlock Advanced**, then click its icon in Safari's toolbar and choose
-      *Always Allow on Every Website*.
+   2. enable **OpenBlock Advanced**, select it in the list and allow it on every website
+      in the pane on the right. The extension has no toolbar button yet; everything is
+      controlled from the OpenBlock menu bar item.
 
 Keep one copy of the app on disk: Safari gets confused when two builds register the same extensions.
 

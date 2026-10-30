@@ -37,6 +37,13 @@ else
   echo "▸ The app is not signed with a certificate; DMG left unsigned"
 fi
 
+# Remove the Release app so macOS does not register a second copy of every
+# Safari extension next to the Debug build (Safari would list each one twice).
+echo "▸ Removing Release app copy"
+rm -rf "$APP"
+DEBUG_APP="build/Build/Products/Debug/OpenBlock.app"
+[ -d "$DEBUG_APP" ] && pluginkit -a "$DEBUG_APP" 2>/dev/null || true
+
 echo "▸ Done"
 ls -la "$DMG"
 shasum -a 256 "$DMG"
