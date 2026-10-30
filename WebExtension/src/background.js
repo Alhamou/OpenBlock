@@ -6,9 +6,11 @@
 // 3. Runs scriptlets in the page's main world with scripting.executeScript, which page CSP
 //    cannot block, and injects CSS as a user stylesheet with scripting.insertCSS.
 //    When either API fails, the code is handed back to the content script as a fallback.
+// 4. Keeps the per-site pause list (toolbar popup) and answers the popup's status requests.
 
 import { scriptlets, SCRIPTLETS_VERSION } from '@adguard/scriptlets';
 import { lookup } from './ruleset.js';
+import { isPaused, withPaused, loadPausedSites, savePausedSites, STORAGE_KEY } from './pause.js';
 
 const APP_ID = 'de.hamou.openblock';
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -38,6 +40,15 @@ async function currentRuleset() {
   if (ruleset === null && pending) await pending;
   return ruleset;
 }
+
+// Sites paused from the toolbar popup. Loaded once; storage changes made elsewhere are mirrored.
+let pausedSites = [];
+const pausedReady = loadPausedSites().then((list) => { pausedSites = list; });
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes[STORAGE_KEY]) pausedSites = changes[STORAGE_KEY].newValue || [];
+});
+
+const EMPTY_RULES = Object.freeze({ css: [], ext: [], scriptlets: [], js: [] });
 
 function hostnameOf(url) {
   try {
@@ -114,13 +125,16 @@ const injections = new Map(); // `${tabId}:${frameId}` → { url, done }
 function inject(tabId, frameId, url, topUrl) {
   const done = (async () => {
     const hostname = hostnameOf(url);
-    const rules = lookup(await currentRuleset(), hostname, hostnameOf(topUrl) || hostname);
+    const topHostname = hostnameOf(topUrl) || hostname;
+    await pausedReady;
+    if (isPaused(pausedSites, topHostname)) return { paused: true, rules: EMPTY_RULES, fallbackScripts: [], css: [] };
+    const rules = lookup(await currentRuleset(), hostname, topHostname);
     const target = { tabId, frameIds: [frameId] };
     const [fallbackScripts, cssInserted] = await Promise.all([
       runScriptlets(target, rules.scriptlets, hostname),
       insertCss(target, rules.css),
     ]);
-    return { rules, fallbackScripts, css: cssInserted ? [] : rules.css };
+    return { paused: false, rules, fallbackScripts, css: cssInserted ? [] : rules.css };
   })();
   injections.set(`${tabId}:${frameId}`, { url, done });
   return done;
@@ -151,6 +165,7 @@ async function handleGetRules(message, sender) {
   if (tabId !== undefined) {
     const injected = await injectionFor(tabId, sender.frameId ?? 0, message.url, sender.tab?.url);
     return {
+      paused: injected.paused,
       css: injected.css,
       ext: injected.rules.ext,
       scripts: [...injected.fallbackScripts, ...injected.rules.js],
@@ -158,21 +173,65 @@ async function handleGetRules(message, sender) {
   }
 
   // No tab (should not happen in Safari): hand everything to the content script.
+  await pausedReady;
+  if (isPaused(pausedSites, topHostname)) return { paused: true, css: [], ext: [], scripts: [] };
   const rules = lookup(await currentRuleset(), hostname, topHostname);
   const scriptletCode = rules.scriptlets.map(({ name, args }) => {
     const resolved = scriptletFunction(name);
     return resolved ? scriptlets.invoke(scriptletSource(resolved.name, args, hostname)) : '';
   }).filter(Boolean);
-  return { css: rules.css, ext: rules.ext, scripts: [...scriptletCode, ...rules.js] };
+  return { paused: false, css: rules.css, ext: rules.ext, scripts: [...scriptletCode, ...rules.js] };
+}
+
+/** Popup: what OpenBlock Advanced does on the tab showing `url`. */
+async function handleGetStatus({ url }) {
+  const hostname = hostnameOf(url);
+  const supported = /^https?:/.test(url || '') && hostname !== '';
+  await pausedReady;
+  const paused = supported && isPaused(pausedSites, hostname);
+  const current = supported && !paused ? await currentRuleset() : ruleset;
+  const rules = supported && !paused ? lookup(current, hostname) : EMPTY_RULES;
+  return {
+    supported,
+    hostname,
+    paused,
+    rulesetLoaded: current !== null,
+    counts: { css: rules.css.length, ext: rules.ext.length, scriptlets: rules.scriptlets.length, js: rules.js.length },
+  };
+}
+
+/** Popup: pause or resume `hostname`; the popup reloads the tab afterwards. */
+async function handleSetPaused({ hostname, paused }) {
+  await pausedReady;
+  if (!hostname) throw new Error('no hostname');
+  pausedSites = withPaused(pausedSites, hostname, Boolean(paused));
+  await savePausedSites(pausedSites);
+  // Drop cached injections so the next navigation re-evaluates the pause.
+  injections.clear();
+  return { paused: isPaused(pausedSites, hostname) };
 }
 
 // sendResponse + `return true` works in every Safari version; returning a Promise does not.
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type !== 'getRules') return false;
-  handleGetRules(message, sender)
-    .then(sendResponse)
-    .catch((error) => sendResponse({ error: String(error), css: [], ext: [], scripts: [] }));
-  return true;
+  switch (message?.type) {
+    case 'getRules':
+      handleGetRules(message, sender)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ error: String(error), css: [], ext: [], scripts: [] }));
+      return true;
+    case 'getStatus':
+      handleGetStatus(message)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ supported: false, hostname: '', error: String(error) }));
+      return true;
+    case 'setPaused':
+      handleSetPaused(message)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ error: String(error) }));
+      return true;
+    default:
+      return false;
+  }
 });
 
 // Warm the cache as soon as the worker starts.

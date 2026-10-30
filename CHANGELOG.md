@@ -2,6 +2,11 @@
 
 All notable changes to OpenBlock are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **Toolbar button** for OpenBlock Advanced: a popup with the current site, the extension's status there and a *Pause on this site* switch.
+
 ## [0.2.0] - 2026-10-27
 
 ### Added

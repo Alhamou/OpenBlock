@@ -11,6 +11,15 @@
     "256": "icon-256.png",
     "512": "icon-512.png"
   },
+  "action": {
+    "default_title": "OpenBlock",
+    "default_icon": {
+      "48": "icon-48.png",
+      "96": "icon-96.png",
+      "128": "icon-128.png"
+    },
+    "default_popup": "popup.html"
+  },
   "background": {
     "service_worker": "background.js"
   },
@@ -23,6 +32,6 @@
       "match_about_blank": true
     }
   ],
-  "permissions": ["nativeMessaging", "scripting", "webNavigation"],
+  "permissions": ["nativeMessaging", "scripting", "webNavigation", "storage", "activeTab"],
   "host_permissions": ["<all_urls>"]
 }

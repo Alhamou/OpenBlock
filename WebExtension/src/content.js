@@ -65,6 +65,11 @@ async function main() {
     reportStatus('no response');
     return;
   }
+  if (rules.paused) {
+    // The user paused OpenBlock Advanced on this site from the toolbar popup.
+    reportStatus('paused on this site');
+    return;
+  }
   reportStatus(rules.error ? `background error: ${rules.error}`
     : `ok css=${rules.css?.length} ext=${rules.ext?.length} scripts=${rules.scripts?.length}`);
 

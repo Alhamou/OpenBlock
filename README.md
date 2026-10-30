@@ -31,7 +31,8 @@ compiles them into its own engine. Nothing sits between you and the web, and not
 - **OpenBlock Advanced**, a Safari Web Extension for the rules content blockers can't express:
   scriptlets (`#%#//scriptlet(...)`, uBO `##+js(...)`), CSS injection (`#$#`), extended CSS
   (`#?#`, `:has-text()`, `:remove()` …) and rules on wildcard-TLD domains (`example.*`).
-  Examples are YouTube ads and anti-adblock walls.
+  Examples are YouTube ads and anti-adblock walls. Its toolbar button shows the current site's
+  status and pauses the advanced rules per site.
 - **Lives in the menu bar**: status, *Update Filters Now*, *Pause Blocking*, *Launch at Login*. The Dock
   icon only shows while the OpenBlock window is open (Settings → "Keep OpenBlock in the menu bar only").
 - **Auto-update** of filter lists every 24 hours while OpenBlock is running (in the menu bar is enough).
@@ -53,8 +54,7 @@ Requires macOS 15 Sequoia or later.
 4. In **Safari → Settings → Extensions**:
    1. enable the four **OpenBlock** content blockers;
    2. enable **OpenBlock Advanced**, select it in the list and allow it on every website
-      in the pane on the right. The extension has no toolbar button yet; everything is
-      controlled from the OpenBlock menu bar item.
+      in the pane on the right. An **OpenBlock** button then appears in Safari's toolbar.
 
 Keep one copy of the app on disk: Safari gets confused when two builds register the same extensions.
 
@@ -64,6 +64,9 @@ Keep one copy of the app on disk: Safari gets confused when two builds register 
 - **User rules**: your own rules in AdBlock syntax, applied by the Custom blocker and OpenBlock Advanced.
 - **Allowlist**: sites where blocking is off.
 - **Menu bar**: *Update Filters Now*, *Pause Blocking*, *Launch at Login*.
+- **Toolbar popup**: the OpenBlock button in Safari's toolbar shows the current site, whether OpenBlock
+  Advanced is active there, and a *Pause on this site* switch that turns the advanced rules off for that
+  site (and its subdomains) until you switch it back on.
 - OpenBlock reloads each blocker as soon as you come back to the app.
 
 ## How it works
@@ -140,7 +143,7 @@ scripts/make-dmg.sh        # Release build → build/OpenBlock-<version>.dmg
 | `App/` | SwiftUI host app: downloads, converts, writes JSON, reloads blockers; menu bar item and settings |
 | `Extensions/ContentBlocker` | One request handler compiled into the four blocker extensions |
 | `Extensions/Advanced` | OpenBlock Advanced web extension: native handler + built JS bundle |
-| `WebExtension/` | Source of the web extension (background worker, content script, rule lookup, tests) |
+| `WebExtension/` | Source of the web extension (background worker, content script, toolbar popup, rule lookup, tests) |
 | `Shared/` | App Group paths used by the app and the extensions |
 | `TestPages/` | Local pages and rules for self-testing |
 | `scripts/` | `make-dmg.sh`, icon generator |
@@ -150,7 +153,7 @@ scripts/make-dmg.sh        # Release build → build/OpenBlock-<version>.dmg
 
 - **Next**: DNS-based blocking for every app on the Mac, not just Safari.
 - `$redirect` / `$removeparam` through `declarativeNetRequest`.
-- Safari toolbar popup with a per-site toggle, element picker, incremental list updates.
+- Element picker, incremental list updates.
 - Developer ID signing and notarization.
 
 Ideas and bug reports are welcome in [Issues](https://github.com/Alhamou/OpenBlock/issues).

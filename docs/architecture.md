@@ -114,7 +114,8 @@ App ──AdvancedCompiler──▶ Rules/advanced.json (App Group)
       suffix list (`tldts`). Plain `example.*##.ad` rules also run here, since Safari's `if-domain` cannot match them
 
 ### Phase 3 — Polish
-- Safari toolbar popup for OpenBlock Advanced with a "disable on this site" toggle (the app already has a global pause)
+- [x] Safari toolbar popup for OpenBlock Advanced with a "Pause on this site" toggle (the app has the global pause).
+      The paused hostnames live in `browser.storage.local`; the background worker skips injection for them.
 - Incremental list updates (`! Diff-Path:` patches) to save bandwidth
 - Element picker: click an element in Safari to create a hiding rule
 - Rule hit statistics (not possible with content blockers alone; needs Phase 2)

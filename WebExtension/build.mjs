@@ -9,7 +9,7 @@ mkdirSync(out, { recursive: true });
 cpSync(new URL('./static/', import.meta.url).pathname, out, { recursive: true });
 
 await build({
-  entryPoints: { background: 'src/background.js', content: 'src/content.js' },
+  entryPoints: { background: 'src/background.js', content: 'src/content.js', popup: 'src/popup.js' },
   outdir: out,
   bundle: true,
   format: 'iife',

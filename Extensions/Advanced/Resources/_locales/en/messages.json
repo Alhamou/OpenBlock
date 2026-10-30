@@ -1,4 +1,15 @@
 {
   "extension_name": { "message": "OpenBlock Advanced" },
-  "extension_description": { "message": "Runs OpenBlock's scriptlets, CSS injection and extended CSS rules that content blockers cannot express." }
+  "extension_description": { "message": "Runs OpenBlock's scriptlets, CSS injection and extended CSS rules that content blockers cannot express." },
+  "popup_pause_site": { "message": "Pause on this site" },
+  "popup_no_site": { "message": "No website" },
+  "popup_status_inactive": { "message": "Inactive" },
+  "popup_status_paused": { "message": "Paused" },
+  "popup_status_loading": { "message": "Loading" },
+  "popup_status_active": { "message": "Active" },
+  "popup_not_a_website": { "message": "OpenBlock only works on web pages." },
+  "popup_paused_detail": { "message": "Advanced rules are off on this site." },
+  "popup_loading_detail": { "message": "Waiting for the rules from the OpenBlock app." },
+  "popup_active_detail": { "message": "Advanced rules are applied on this site." },
+  "popup_no_rules_detail": { "message": "No advanced rules for this site. Content blockers still apply." }
 }
